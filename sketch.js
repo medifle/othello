@@ -8,8 +8,8 @@ let board, reachableSpots, lastPlay
 let counts // array
 let curPlayerIndex // 0 for Black, 1 for White
 const players = ['B', 'W']
-// let human = [true, true]
-const human = [false, false]
+let human = [true, true]
+// const human = [false, false]
 const ai = ['alphabeta', 'mtdf'] // 'random', 'alphabeta', 'mtdf', 'mcts'
 const aiDepth = [3, 3]
 
@@ -356,6 +356,8 @@ function expand(playerIndex) {
 // https://people.csail.mit.edu/plaat/mtdf.html#abmem
 // https://github.com/jennydvr/Othello/blob/master/alphabetapr.cpp
 function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
+  if (isRoot) nodeCount = 0
+
   // [START check transposition table]
   const hash = getBoardHash()
   const store = transpositionTable.get(hash)
@@ -509,19 +511,22 @@ function MTDF(f, depth) {
 
   while (lowerBound < upperBound) {
     beta = max(g, lowerBound + 1);
-    ({bestScore: g, index: spotIndex} = alphabetaMemo(curPlayerIndex, depth, beta-1, beta, true))
+    // ({bestScore: g, index: spotIndex} = alphabetaMemo(curPlayerIndex, depth, beta-1, beta, true))
+    ({bestScore: g, index: spotIndex} = alphabetaAI(curPlayerIndex, depth, beta-1, beta, true))//test
     if (g < beta) {
       upperBound = g;
     } else {
       lowerBound = g
     }
+    console.log(`g ${g}, beta ${beta}, (${lowerBound},${upperBound})`)
   }
   // return {g, spotIndex}//todo
-  console.log('spotIndex', spotIndex)
   return spotIndex
 }
 
 function alphabetaAI(playerIndex, depth, alpha, beta, isRoot = false) {
+  if (isRoot) nodeCount = 0
+
   if (isGameOver()) {
     evaluate(true)
   }
@@ -601,7 +606,7 @@ function alphabetaAI(playerIndex, depth, alpha, beta, isRoot = false) {
   }
 
   console.log('alphabetaAI: nodeCount', nodeCount) //test
-  return index
+  return {index, bestScore}
 }
 
 function nextTurn(algo = 'random') {
@@ -616,30 +621,17 @@ function nextTurn(algo = 'random') {
         index = randomAI()
         break
       case 'alphabeta':
-        shuffle(reachableSpots, true)//test
-        nodeCount = 0
-        index = alphabetaAI(
+        shuffle(reachableSpots, true);//test
+        ({index} = alphabetaAI(
           curPlayerIndex,
           aiDepth[curPlayerIndex],
           -Infinity,
           Infinity,
           true
-        )
-        break
-      case 'alphabetaMemo':
-        shuffle(reachableSpots, true)//test
-        nodeCount = 0
-        index = alphabetaMemo(
-          curPlayerIndex,
-          aiDepth[curPlayerIndex],
-          -Infinity,
-          Infinity,
-          true
-        )
+        ))
         break
       case 'mtdf':
         shuffle(reachableSpots, true)//test
-        nodeCount = 0
         index = MTDF(0, aiDepth[curPlayerIndex])
         break
     }
@@ -659,6 +651,22 @@ function nextTurn(algo = 'random') {
     // change player
     curPlayerIndex = curPlayerIndex ^ 1
     setTimeout(nextTurn.bind(null, ai[curPlayerIndex]), interval)
+  }
+}
+
+/**
+ * For debug: fast move
+ * start from black, index start from 1
+ * @param moveArr e.g. [[5,6],[6,4]]
+ */
+function loadState(moveArr) {
+  for (let _move of moveArr) {
+    let index = reachableSpots.findIndex(
+      (e) => e[0] === (_move[0]-1) && e[1] === (_move[1]-1)
+    )
+    reachableSpots.splice(index, 1)[0]
+    move(_move[0]-1, _move[1]-1)
+    curPlayerIndex = curPlayerIndex ^ 1
   }
 }
 
