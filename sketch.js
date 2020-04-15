@@ -366,16 +366,16 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
     if (lowerbound) {
       if (lowerbound >= beta) {
         if (isRoot) {
-          return {index: store.index, bestScore: lowerbound};
+          return {index: store.index, bestScore: lowerbound}
         }
-        return lowerbound;
+        return lowerbound
       }
       alpha = max(alpha, lowerbound)
     }
     if (upperbound) {
       if (upperbound <= alpha) {
         if (isRoot) {
-          return {index: store.index, bestScore: upperbound};
+          return {index: store.index, bestScore: upperbound}
         }
         return upperbound
       }
@@ -402,17 +402,18 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
   const saveCounts = [...counts]
 
   let index = -1
-  let bestScore
+  let bestScore, a, b
   // Max node
   if (playerIndex === curPlayerIndex) {
     bestScore = -Infinity
+    a = alpha /* save original alpha value */
     for (let child of children) {
       nodeCount += 1
       let spotIndex = child[2]
       // modify
       reachableSpots.splice(spotIndex, 1)
       coreMove(child[0], child[1], playerIndex)
-      let score = alphabetaMemo(playerIndex ^ 1, depth - 1, alpha, beta)
+      let score = alphabetaMemo(playerIndex ^ 1, depth - 1, a, beta)
 
       // note that if all children return the same score, the order of reachableSpots matters
       // that's why we shuffle reachableSpots in nextTurn()
@@ -425,9 +426,9 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
       board = saveBoard.map((e) => e.slice(0)) // deep restore
       counts = [...saveCounts]
 
-      alpha = max(alpha, score)
+      a = max(a, score)
       // cut-off
-      if (alpha >= beta) {
+      if (a >= beta) {
         break
       }
     }
@@ -435,13 +436,14 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
   // Min node
   else {
     bestScore = Infinity
+    b = beta /* save original beta value */
     for (let child of children) {
       nodeCount += 1
       let spotIndex = child[2]
       // modify
       reachableSpots.splice(spotIndex, 1)
       coreMove(child[0], child[1], playerIndex)
-      let score = alphabetaMemo(playerIndex ^ 1, depth - 1, alpha, beta)
+      let score = alphabetaMemo(playerIndex ^ 1, depth - 1, alpha, b)
       if (score < bestScore) {
         bestScore = score
         index = spotIndex
@@ -451,9 +453,9 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
       board = saveBoard.map((e) => e.slice(0)) // deep restore
       counts = [...saveCounts]
 
-      beta = min(beta, score)
+      b = min(b, score)
       // cut-off
-      if (alpha >= beta) {
+      if (alpha >= b) {
         break
       }
     }
@@ -465,7 +467,7 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
     transpositionTable.set(hash, {
       depth: depth,
       upperbound: bestScore,
-      index
+      index,
     })
   }
   /* Found an accurate minimax value - will not occur if called with zero window */
@@ -474,7 +476,7 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
       depth: depth,
       upperbound: bestScore,
       lowerbound: bestScore,
-      index
+      index,
     })
   }
   /* Fail high result implies a lower bound */
@@ -482,13 +484,13 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
     transpositionTable.set(hash, {
       depth: depth,
       lowerbound: bestScore,
-      index
+      index,
     })
   }
   // [END check table]
 
   if (!isRoot) {
-    return bestScore;
+    return bestScore
   }
 
   console.log('alphabetaMemo: nodeCount', nodeCount) //test
@@ -510,11 +512,16 @@ function MTDF(f, depth) {
   let lowerBound = -Infinity
 
   while (lowerBound < upperBound) {
-    beta = max(g, lowerBound + 1);
-    // ({bestScore: g, index: spotIndex} = alphabetaMemo(curPlayerIndex, depth, beta-1, beta, true))
-    ({bestScore: g, index: spotIndex} = alphabetaAI(curPlayerIndex, depth, beta-1, beta, true))//test
+    beta = max(g, lowerBound + 1)
+    ;({bestScore: g, index: spotIndex} = alphabetaMemo(
+      curPlayerIndex,
+      depth,
+      beta - 1,
+      beta,
+      true
+    ))
     if (g < beta) {
-      upperBound = g;
+      upperBound = g
     } else {
       lowerBound = g
     }
@@ -621,8 +628,8 @@ function nextTurn(algo = 'random') {
         index = randomAI()
         break
       case 'alphabeta':
-        shuffle(reachableSpots, true);//test
-        ({index} = alphabetaAI(
+        shuffle(reachableSpots, true) //test
+        ;({index} = alphabetaAI(
           curPlayerIndex,
           aiDepth[curPlayerIndex],
           -Infinity,
@@ -631,7 +638,7 @@ function nextTurn(algo = 'random') {
         ))
         break
       case 'mtdf':
-        shuffle(reachableSpots, true)//test
+        shuffle(reachableSpots, true) //test
         index = MTDF(0, aiDepth[curPlayerIndex])
         break
     }
@@ -662,10 +669,10 @@ function nextTurn(algo = 'random') {
 function loadState(moveArr) {
   for (let _move of moveArr) {
     let index = reachableSpots.findIndex(
-      (e) => e[0] === (_move[0]-1) && e[1] === (_move[1]-1)
+      (e) => e[0] === _move[0] - 1 && e[1] === _move[1] - 1
     )
     reachableSpots.splice(index, 1)[0]
-    move(_move[0]-1, _move[1]-1)
+    move(_move[0] - 1, _move[1] - 1)
     curPlayerIndex = curPlayerIndex ^ 1
   }
 }
