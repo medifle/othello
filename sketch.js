@@ -10,8 +10,8 @@ let curPlayerIndex // 0 for Black, 1 for White
 const players = ['B', 'W']
 // let human = [true, true]
 const human = [false, false]
-const ai = ['alphabeta', 'mtdf'] // 'random', 'alphabeta', 'mtdf', 'mcts'
-const aiDepth = [3, 3]
+const ai = ['alphabeta', 'mtdf_id'] // 'random', 'alphabeta', 'mtdf', 'mtdf_id', 'mcts'
+const aiDepth = [6, 6]
 
 let interval = 1
 let nodeCount = 0
@@ -504,14 +504,14 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
 function MTDF(f, depth) {
   nodeCount = 0
 
-  let beta, spotIndex
+  let beta, index
   let g = f
   let upperBound = Infinity
   let lowerBound = -Infinity
 
   while (lowerBound < upperBound) {
     beta = max(g, lowerBound + 1)
-    ;({bestScore: g, index: spotIndex} = alphabetaMemo(
+    ;({bestScore: g, index} = alphabetaMemo(
       curPlayerIndex,
       depth,
       beta - 1,
@@ -526,8 +526,26 @@ function MTDF(f, depth) {
     // console.log(`MTDF: g ${g}, beta ${beta}, (${lowerBound},${upperBound})`) //test
   }
   console.log(`MTDF: nodeCount ${nodeCount}`)
-  // return {g, spotIndex}//todo
-  return spotIndex
+  return {g, index}
+}
+
+/**
+ * MTDF with Iterative Deepening
+ * https://people.csail.mit.edu/plaat/mtdf.html
+ *
+ * @param depth max search depth
+ */
+function MTDF_ID(depth) {
+  let firstGuess = 0
+  let index
+  console.log('MTDF_ID: start')
+  for (let d = 1; d <= depth; ++d) {
+    // console.log(`MTDF_ID: search depth ${d}`) // test
+    ;({g: firstGuess, index} = MTDF(firstGuess, d))
+    // console.log(`MTDF_ID: firstGuess ${firstGuess}`) //test
+  }
+  console.log('MTDF_ID: finished')
+  return index
 }
 
 function alphabetaAI(playerIndex, depth, alpha, beta, isRoot = false) {
@@ -638,7 +656,11 @@ function nextTurn(algo = 'random') {
         break
       case 'mtdf':
         // shuffle(reachableSpots, true)
-        index = MTDF(0, aiDepth[curPlayerIndex])
+        ;({index} = MTDF(0, aiDepth[curPlayerIndex]))
+        break
+      case 'mtdf_id':
+        // shuffle(reachableSpots, true)
+        index = MTDF_ID(aiDepth[curPlayerIndex])
         break
     }
     let spot = reachableSpots.splice(index, 1)[0]
