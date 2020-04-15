@@ -8,8 +8,8 @@ let board, reachableSpots, lastPlay
 let counts // array
 let curPlayerIndex // 0 for Black, 1 for White
 const players = ['B', 'W']
-let human = [true, true]
-// const human = [false, false]
+// let human = [true, true]
+const human = [false, false]
 const ai = ['alphabeta', 'mtdf'] // 'random', 'alphabeta', 'mtdf', 'mcts'
 const aiDepth = [3, 3]
 
@@ -356,8 +356,6 @@ function expand(playerIndex) {
 // https://people.csail.mit.edu/plaat/mtdf.html#abmem
 // https://github.com/jennydvr/Othello/blob/master/alphabetapr.cpp
 function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
-  if (isRoot) nodeCount = 0
-
   // [START check transposition table]
   const hash = getBoardHash()
   const store = transpositionTable.get(hash)
@@ -493,8 +491,6 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
     return bestScore
   }
 
-  console.log('alphabetaMemo: nodeCount', nodeCount) //test
-  // console.log({index, bestScore})//test
   return {index, bestScore}
 }
 
@@ -506,6 +502,8 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
  * @param depth
  */
 function MTDF(f, depth) {
+  nodeCount = 0
+
   let beta, spotIndex
   let g = f
   let upperBound = Infinity
@@ -525,8 +523,9 @@ function MTDF(f, depth) {
     } else {
       lowerBound = g
     }
-    console.log(`g ${g}, beta ${beta}, (${lowerBound},${upperBound})`)
+    // console.log(`MTDF: g ${g}, beta ${beta}, (${lowerBound},${upperBound})`) //test
   }
+  console.log(`MTDF: nodeCount ${nodeCount}`)
   // return {g, spotIndex}//todo
   return spotIndex
 }
@@ -612,7 +611,7 @@ function alphabetaAI(playerIndex, depth, alpha, beta, isRoot = false) {
     return bestScore
   }
 
-  console.log('alphabetaAI: nodeCount', nodeCount) //test
+  console.log('alphabetaAI: nodeCount', nodeCount)
   return {index, bestScore}
 }
 
@@ -628,7 +627,7 @@ function nextTurn(algo = 'random') {
         index = randomAI()
         break
       case 'alphabeta':
-        shuffle(reachableSpots, true) //test
+        // shuffle(reachableSpots, true)
         ;({index} = alphabetaAI(
           curPlayerIndex,
           aiDepth[curPlayerIndex],
@@ -638,7 +637,7 @@ function nextTurn(algo = 'random') {
         ))
         break
       case 'mtdf':
-        shuffle(reachableSpots, true) //test
+        // shuffle(reachableSpots, true)
         index = MTDF(0, aiDepth[curPlayerIndex])
         break
     }
