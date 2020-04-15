@@ -8,10 +8,10 @@ let board, reachableSpots, lastPlay
 let counts // array
 let curPlayerIndex // 0 for Black, 1 for White
 const players = ['B', 'W']
-// let human = [true, false]
-const human = [false, false]
-const ai = ['alphabeta', 'alphabeta'] // 'random', 'alphabeta', 'mtdf', 'mcts'
-const aiDepth = [3, 3]
+let human = [true, false]
+// const human = [false, false]
+const ai = ['alphabeta', 'alphabetaMemo'] // 'random', 'alphabeta', 'alphabetaMemo', 'mtdf', 'mcts'
+const aiDepth = [6, 6]
 
 let interval = 1
 let nodeCount = 0
@@ -21,6 +21,43 @@ let nodeCount = 0
  */
 let squareWidth, squareHeight
 let history, scoreBoard
+
+/**
+ * For transposition table
+ */
+const zobristTable = make3DrandomArray(8, 8, 2)
+const transpositionTable = new Map()
+
+function make3DrandomArray(x, y, z) {
+  // 2 ** 53 - 1 is javascript limit, through 2 ** 64 is more desirable(require external lib)
+  const bound = Number.MAX_SAFE_INTEGER + 1
+  return Array(x)
+    .fill(0)
+    .map((e) =>
+      Array(y)
+        .fill(0)
+        .map((e) =>
+          Array(z)
+            .fill(0)
+            .map((e) => Math.floor(Math.random() * bound))
+        )
+    )
+}
+
+// Zobrist Hashing
+function getBoardHash() {
+  let h = 0
+  for (let i = 0; i < 8; ++i) {
+    for (let j = 0; j < 8; ++j) {
+      let player = board[i][j]
+      if (players.includes(player)) {
+        let p = players.indexOf(player)
+        h ^= zobristTable[i][j][p]
+      }
+    }
+  }
+  return h
+}
 
 function start() {
   // default config
@@ -315,6 +352,138 @@ function expand(playerIndex) {
   return children
 }
 
+// AlphaBetaWithMemory
+// https://people.csail.mit.edu/plaat/mtdf.html#abmem
+// https://github.com/jennydvr/Othello/blob/master/alphabetapr.cpp
+function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
+  // [START check transposition table]
+  const hash = getBoardHash()
+  const store = transpositionTable.get(hash)
+  if (store && store.depth >= depth) {
+    const {lowerbound, upperbound} = store
+    if (lowerbound) {
+      if (lowerbound >= beta) {
+        return lowerbound
+      }
+      alpha = max(alpha, lowerbound)
+    }
+    if (upperbound) {
+      if (upperbound <= alpha) {
+        return upperbound
+      }
+      beta = min(beta, upperbound)
+    }
+  }
+  // [END check transposition table]
+
+  if (isGameOver()) {
+    evaluate(true)
+  }
+  if (depth === 0) {
+    return evaluate()
+  }
+  // generate children
+  let children = expand(playerIndex)
+  // if children is empty, return evaluated score
+  if (children.length === 0) {
+    return evaluate()
+  }
+
+  const saveReachableSpots = [...reachableSpots]
+  const saveBoard = board.map((e) => e.slice(0)) // clone 2d array with primitive value
+  const saveCounts = [...counts]
+
+  let index = -1
+  let bestScore
+  // Max node
+  if (playerIndex === curPlayerIndex) {
+    bestScore = -Infinity
+    for (let child of children) {
+      nodeCount += 1
+      let spotIndex = child[2]
+      // modify
+      reachableSpots.splice(spotIndex, 1)
+      coreMove(child[0], child[1], playerIndex)
+      let score = alphabetaMemo(playerIndex ^ 1, depth - 1, alpha, beta)
+
+      // note that if all children return the same score, the order of reachableSpots matters
+      // that's why we shuffle reachableSpots in nextTurn()
+      if (score > bestScore) {
+        bestScore = score
+        index = spotIndex
+      }
+      // restore
+      reachableSpots = [...saveReachableSpots]
+      board = saveBoard.map((e) => e.slice(0)) // deep restore
+      counts = [...saveCounts]
+
+      alpha = max(alpha, score)
+      // cut-off
+      if (alpha >= beta) {
+        break
+      }
+    }
+  }
+  // Min node
+  else {
+    bestScore = Infinity
+    for (let child of children) {
+      nodeCount += 1
+      let spotIndex = child[2]
+      // modify
+      reachableSpots.splice(spotIndex, 1)
+      coreMove(child[0], child[1], playerIndex)
+      let score = alphabetaMemo(playerIndex ^ 1, depth - 1, alpha, beta)
+      if (score < bestScore) {
+        bestScore = score
+        index = spotIndex
+      }
+      // restore
+      reachableSpots = [...saveReachableSpots]
+      board = saveBoard.map((e) => e.slice(0)) // deep restore
+      counts = [...saveCounts]
+
+      beta = min(beta, score)
+      // cut-off
+      if (alpha >= beta) {
+        break
+      }
+    }
+  }
+
+  // [START check table]
+  /* Fail low result implies an upper bound */
+  if (bestScore <= alpha) {
+    transpositionTable.set(hash, {
+      depth: depth,
+      upperbound: bestScore
+    })
+  }
+  /* Found an accurate minimax value - will not occur if called with zero window */
+  if (bestScore > alpha && bestScore < beta) {
+    transpositionTable.set(hash, {
+      depth: depth,
+      upperbound: bestScore,
+      lowerbound: bestScore,
+    })
+  }
+  /* Fail high result implies a lower bound */
+  if (bestScore >= beta) {
+    transpositionTable.set(hash, {
+      depth: depth,
+      lowerbound: bestScore,
+    })
+  }
+  // [END check table]
+
+  if (!isRoot) {
+    return bestScore;
+  }
+
+  console.log('alphabetaMemo: nodeCount', nodeCount) //test
+  return index
+}
+
 function alphabetaAI(playerIndex, depth, alpha, beta, isRoot = false) {
   if (isGameOver()) {
     evaluate(true)
@@ -324,7 +493,6 @@ function alphabetaAI(playerIndex, depth, alpha, beta, isRoot = false) {
   }
   // generate children
   let children = expand(playerIndex)
-  // console.log('children', children) //test
   // if children is empty, return evaluated score
   if (children.length === 0) {
     return evaluate()
@@ -346,7 +514,6 @@ function alphabetaAI(playerIndex, depth, alpha, beta, isRoot = false) {
       reachableSpots.splice(spotIndex, 1)
       coreMove(child[0], child[1], playerIndex)
       let score = alphabetaAI(playerIndex ^ 1, depth - 1, alpha, beta)
-      // console.log('score', score, child) //test
 
       // note that if all children return the same score, the order of reachableSpots matters
       // that's why we shuffle reachableSpots in nextTurn()
@@ -396,7 +563,7 @@ function alphabetaAI(playerIndex, depth, alpha, beta, isRoot = false) {
     return bestScore
   }
 
-  console.log('nodeCount', nodeCount) //test
+  console.log('alphabetaAI: nodeCount', nodeCount) //test
   return index
 }
 
@@ -412,10 +579,20 @@ function nextTurn(algo = 'random') {
         index = randomAI()
         break
       case 'alphabeta':
-        // console.log(reachableSpots.map((e) => e.slice(0))) //test sync
-        shuffle(reachableSpots, true)
+        // shuffle(reachableSpots, true)//test
         nodeCount = 0
         index = alphabetaAI(
+          curPlayerIndex,
+          aiDepth[curPlayerIndex],
+          -Infinity,
+          Infinity,
+          true
+        )
+        break
+      case 'alphabetaMemo':
+        // shuffle(reachableSpots, true)//test
+        nodeCount = 0
+        index = alphabetaMemo(
           curPlayerIndex,
           aiDepth[curPlayerIndex],
           -Infinity,
