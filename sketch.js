@@ -8,10 +8,10 @@ let board, reachableSpots, lastPlay
 let counts // array
 let curPlayerIndex // 0 for Black, 1 for White
 const players = ['B', 'W']
-let human = [true, false]
-// const human = [false, false]
-const ai = ['alphabeta', 'alphabetaMemo'] // 'random', 'alphabeta', 'alphabetaMemo', 'mtdf', 'mcts'
-const aiDepth = [6, 6]
+// let human = [true, true]
+const human = [false, false]
+const ai = ['alphabeta', 'mtdf'] // 'random', 'alphabeta', 'mtdf', 'mcts'
+const aiDepth = [3, 3]
 
 let interval = 1
 let nodeCount = 0
@@ -363,12 +363,18 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
     const {lowerbound, upperbound} = store
     if (lowerbound) {
       if (lowerbound >= beta) {
-        return lowerbound
+        if (isRoot) {
+          return {index: store.index, bestScore: lowerbound};
+        }
+        return lowerbound;
       }
       alpha = max(alpha, lowerbound)
     }
     if (upperbound) {
       if (upperbound <= alpha) {
+        if (isRoot) {
+          return {index: store.index, bestScore: upperbound};
+        }
         return upperbound
       }
       beta = min(beta, upperbound)
@@ -456,7 +462,8 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
   if (bestScore <= alpha) {
     transpositionTable.set(hash, {
       depth: depth,
-      upperbound: bestScore
+      upperbound: bestScore,
+      index
     })
   }
   /* Found an accurate minimax value - will not occur if called with zero window */
@@ -465,6 +472,7 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
       depth: depth,
       upperbound: bestScore,
       lowerbound: bestScore,
+      index
     })
   }
   /* Fail high result implies a lower bound */
@@ -472,6 +480,7 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
     transpositionTable.set(hash, {
       depth: depth,
       lowerbound: bestScore,
+      index
     })
   }
   // [END check table]
@@ -481,7 +490,35 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
   }
 
   console.log('alphabetaMemo: nodeCount', nodeCount) //test
-  return index
+  // console.log({index, bestScore})//test
+  return {index, bestScore}
+}
+
+/**
+ * https://people.csail.mit.edu/plaat/mtdf.html
+ * https://en.wikipedia.org/wiki/MTD-f
+ *
+ * @param f first guess for best value
+ * @param depth
+ */
+function MTDF(f, depth) {
+  let beta, spotIndex
+  let g = f
+  let upperBound = Infinity
+  let lowerBound = -Infinity
+
+  while (lowerBound < upperBound) {
+    beta = max(g, lowerBound + 1);
+    ({bestScore: g, index: spotIndex} = alphabetaMemo(curPlayerIndex, depth, beta-1, beta, true))
+    if (g < beta) {
+      upperBound = g;
+    } else {
+      lowerBound = g
+    }
+  }
+  // return {g, spotIndex}//todo
+  console.log('spotIndex', spotIndex)
+  return spotIndex
 }
 
 function alphabetaAI(playerIndex, depth, alpha, beta, isRoot = false) {
@@ -579,7 +616,7 @@ function nextTurn(algo = 'random') {
         index = randomAI()
         break
       case 'alphabeta':
-        // shuffle(reachableSpots, true)//test
+        shuffle(reachableSpots, true)//test
         nodeCount = 0
         index = alphabetaAI(
           curPlayerIndex,
@@ -590,7 +627,7 @@ function nextTurn(algo = 'random') {
         )
         break
       case 'alphabetaMemo':
-        // shuffle(reachableSpots, true)//test
+        shuffle(reachableSpots, true)//test
         nodeCount = 0
         index = alphabetaMemo(
           curPlayerIndex,
@@ -599,6 +636,11 @@ function nextTurn(algo = 'random') {
           Infinity,
           true
         )
+        break
+      case 'mtdf':
+        shuffle(reachableSpots, true)//test
+        nodeCount = 0
+        index = MTDF(0, aiDepth[curPlayerIndex])
         break
     }
     let spot = reachableSpots.splice(index, 1)[0]
