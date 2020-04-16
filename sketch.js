@@ -10,11 +10,11 @@ let curPlayerIndex // current player index: 0 for Black, 1 for White
 const players = ['B', 'W']
 // let human = [true, false]
 const human = [false, false]
-const ai = ['random', 'mcs'] // 'random', 'alphabeta', 'mtdf', 'mtdf_id', 'mcs', 'mcts'
-const aiDepth = [2, 6] // alphabeta, mtdf
+const ai = ['alphabeta', 'mtdf_id'] // 'random', 'alphabeta', 'mtdf', 'mtdf_id', 'mcs', 'mcts'
+const aiDepth = [5, 5] // alphabeta, mtdf, mtdf_id
 const simulationRound = [500, 500] // mcs, mcts
 
-let interval = 1 // used with setTimeout to resolve rendering blocking
+let interval = 30 // used with setTimeout to resolve rendering blocking
 let nodeCount = 0
 
 /**
@@ -46,7 +46,7 @@ function make3DrandomArray(x, y, z) {
 }
 
 // Zobrist Hashing
-function getBoardHash() {
+function computeBoardHash() {
   let h = 0
   for (let i = 0; i < 8; ++i) {
     for (let j = 0; j < 8; ++j) {
@@ -216,6 +216,7 @@ function randomAI() {
 }
 
 // [START heuristic evaluation]
+// Credits: Copper France
 function corners(playerIndex) {
   let stable = []
   const curPlayer = players[playerIndex]
@@ -343,9 +344,10 @@ function expand(playerIndex) {
 // AlphaBetaWithMemory
 // https://people.csail.mit.edu/plaat/mtdf.html#abmem
 // https://github.com/jennydvr/Othello/blob/master/alphabetapr.cpp
+// https://www.gamedev.net/forums/topic.asp?topic_id=503234
 function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
   // [START check transposition table]
-  const hash = getBoardHash()
+  const hash = computeBoardHash()
   const store = transpositionTable.get(hash)
   if (store && store.depth >= depth) {
     const {lowerbound, upperbound} = store
@@ -725,7 +727,7 @@ function nextTurn(algo = 'random') {
         index = MTDF_ID(aiDepth[curPlayerIndex])
         break
       case 'mcs':
-        // shuffle(reachableSpots, true)
+        shuffle(reachableSpots, true)
         index = MCS(simulationRound[curPlayerIndex])
         break
     }
