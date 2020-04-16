@@ -17,7 +17,7 @@ let interval = 1
 let nodeCount = 0
 
 /**
- * For drawing
+ * For UI
  */
 let squareWidth, squareHeight
 let history, scoreBoard
@@ -75,6 +75,8 @@ function start() {
   lastPlay = [-1, -1]
   reachableSpots = []
   curPlayerIndex = 0
+
+  // init reachableSpots
   for (let j = 0; j < 8; j++) {
     for (let i = 0; i < 8; i++) {
       if (board[i][j] === 'A') {
@@ -88,22 +90,6 @@ function start() {
   if (!human[curPlayerIndex]) {
     setTimeout(nextTurn.bind(null, ai[curPlayerIndex]), interval)
   }
-}
-
-function addFinalResult(result) {
-  scoreBoard.elt.innerHTML += `<br/>${result}`
-}
-
-function addList(text) {
-  let div = createDiv(`${players[curPlayerIndex]}:${text}`)
-  history.child(div)
-  history.elt.scrollTop = history.elt.scrollHeight // keep showing the latest item
-}
-
-function updateScoreBoard() {
-  scoreBoard.html(
-    `Black: ${counts[0]} &nbsp;&nbsp;&nbsp;-&nbsp;&nbsp;&nbsp; White: ${counts[1]}`
-  )
 }
 
 function coreMove(i, j, playerIndex) {
@@ -337,6 +323,7 @@ function isGameOver() {
 }
 
 /**
+ * Generate children nodes (virtual)
  *
  * @param playerIndex
  * @returns {[]} [spot[0], spot[1], spotIndex]
@@ -383,7 +370,7 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
   // [END check transposition table]
 
   if (isGameOver()) {
-    evaluate(true)
+    return evaluate(true)
   }
   if (depth === 0) {
     return evaluate()
@@ -391,6 +378,8 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
   // generate children
   let children = expand(playerIndex)
   // if children is empty, return evaluated score
+  // this is possible even we have isGameOver() check above:
+  // when this player has no children but the opponent has at least one child
   if (children.length === 0) {
     return evaluate()
   }
@@ -552,7 +541,7 @@ function alphabetaAI(playerIndex, depth, alpha, beta, isRoot = false) {
   if (isRoot) nodeCount = 0
 
   if (isGameOver()) {
-    evaluate(true)
+    return evaluate(true)
   }
   if (depth === 0) {
     return evaluate()
@@ -560,6 +549,8 @@ function alphabetaAI(playerIndex, depth, alpha, beta, isRoot = false) {
   // generate children
   let children = expand(playerIndex)
   // if children is empty, return evaluated score
+  // this is possible even we have isGameOver() check above:
+  // when this player has no children but the opponent has at least one child
   if (children.length === 0) {
     return evaluate()
   }
@@ -696,6 +687,25 @@ function loadState(moveArr) {
     move(_move[0] - 1, _move[1] - 1)
     curPlayerIndex = curPlayerIndex ^ 1
   }
+}
+
+/**
+ * UI
+ */
+function addFinalResult(result) {
+  scoreBoard.elt.innerHTML += `<br/>${result}`
+}
+
+function addList(text) {
+  let div = createDiv(`${players[curPlayerIndex]}:${text}`)
+  history.child(div)
+  history.elt.scrollTop = history.elt.scrollHeight // keep showing the latest item
+}
+
+function updateScoreBoard() {
+  scoreBoard.html(
+    `Black: ${counts[0]} &nbsp;&nbsp;&nbsp;-&nbsp;&nbsp;&nbsp; White: ${counts[1]}`
+  )
 }
 
 function mousePressed() {
