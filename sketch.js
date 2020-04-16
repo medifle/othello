@@ -6,14 +6,15 @@ let board, reachableSpots, lastPlay
  * For player
  */
 let counts // array
-let curPlayerIndex // 0 for Black, 1 for White
+let curPlayerIndex // current player index: 0 for Black, 1 for White
 const players = ['B', 'W']
-// let human = [true, true]
+// let human = [true, false]
 const human = [false, false]
-const ai = ['alphabeta', 'mtdf_id'] // 'random', 'alphabeta', 'mtdf', 'mtdf_id', 'mcts'
-const aiDepth = [6, 6]
+const ai = ['random', 'mcs'] // 'random', 'alphabeta', 'mtdf', 'mtdf_id', 'mcs', 'mcts'
+const aiDepth = [2, 6] // alphabeta, mtdf
+const simulationRound = [500, 500] // mcs, mcts
 
-let interval = 1
+let interval = 1 // used with setTimeout to resolve rendering blocking
 let nodeCount = 0
 
 /**
@@ -196,11 +197,11 @@ function hasAvailablePlayer(playerIndex) {
 function checkWinner() {
   if (isGameOver()) {
     if (counts[0] > counts[1]) {
-      return 'Black wins'
+      return 'B'
     } else if (counts[1] > counts[0]) {
-      return 'White wins'
+      return 'W'
     } else {
-      return 'Tie!'
+      return 'T' // tie
     }
   }
 }
@@ -624,6 +625,76 @@ function alphabetaAI(playerIndex, depth, alpha, beta, isRoot = false) {
   return {index, bestScore}
 }
 
+/**
+ * Monte-Carlo search simulation
+ */
+function MCS_simulate(n, playerIndex) {
+  // save game state
+  const saveReachableSpots = [...reachableSpots]
+  const saveBoard = board.map((e) => e.slice(0)) // clone 2d array with primitive value
+  const saveCounts = [...counts]
+
+  let pIndex = playerIndex
+  let count = 0
+  for (let i = 0; i < n; ++i) {
+    while (!isGameOver()) {
+      let children = expand(pIndex)
+      if (children.length > 0) {
+        let chosenChild = random(children)
+        let spotIndex = chosenChild[2]
+        // make move
+        reachableSpots.splice(spotIndex, 1)
+        coreMove(chosenChild[0], chosenChild[1], pIndex)
+      }
+      pIndex = pIndex ^ 1
+    }
+    if (checkWinner() === players[curPlayerIndex]) {
+      count += 1
+    }
+    // restore
+    reachableSpots = [...saveReachableSpots]
+    board = saveBoard.map((e) => e.slice(0)) // deep restore
+    counts = [...saveCounts]
+  }
+  return count / n
+}
+
+/**
+ * pure Monte-Carlo search
+ *
+ * @param n simulation rounds
+ */
+function MCS(n) {
+  let playerIndex = curPlayerIndex
+  let bestScore = -Infinity
+  let index = -1 // the index associated with bestScore
+
+  // save game state
+  const saveReachableSpots = [...reachableSpots]
+  const saveBoard = board.map((e) => e.slice(0)) // clone 2d array with primitive value
+  const saveCounts = [...counts]
+
+  let children = expand(playerIndex)
+  for (let child of children) {
+    let spotIndex = child[2]
+    // modify (make move)
+    reachableSpots.splice(spotIndex, 1)
+    coreMove(child[0], child[1], playerIndex)
+
+    let score = MCS_simulate(n, playerIndex ^ 1)
+    if (score > bestScore) {
+      bestScore = score
+      index = spotIndex
+    }
+    // restore
+    reachableSpots = [...saveReachableSpots]
+    board = saveBoard.map((e) => e.slice(0)) // deep restore
+    counts = [...saveCounts]
+  }
+  console.log(`MCS score ${bestScore}`)//test
+  return index
+}
+
 function nextTurn(algo = 'random') {
   let notAvailable = false
   if (hasAvailablePlayer(curPlayerIndex)) {
@@ -653,6 +724,10 @@ function nextTurn(algo = 'random') {
         // shuffle(reachableSpots, true)
         index = MTDF_ID(aiDepth[curPlayerIndex])
         break
+      case 'mcs':
+        // shuffle(reachableSpots, true)
+        index = MCS(simulationRound[curPlayerIndex])
+        break
     }
     let spot = reachableSpots.splice(index, 1)[0]
     move(spot[0], spot[1])
@@ -662,7 +737,7 @@ function nextTurn(algo = 'random') {
 
   let result = checkWinner()
   if (result) {
-    addFinalResult(result)
+    addFinalResult(gameResultToText(result))
   } else {
     if (notAvailable) {
       addList('pass')
@@ -671,6 +746,21 @@ function nextTurn(algo = 'random') {
     curPlayerIndex = curPlayerIndex ^ 1
     setTimeout(nextTurn.bind(null, ai[curPlayerIndex]), interval)
   }
+}
+
+function gameResultToText(result) {
+  let resultText = ''
+  switch (result) {
+    case 'B':
+      resultText = 'Black wins'
+      break
+    case 'W':
+      resultText = 'White wins'
+      break
+    case 'T':
+      resultText = 'Tie!'
+  }
+  return resultText
 }
 
 /**
