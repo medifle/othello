@@ -17,6 +17,9 @@ const simulationRound = [500, 500] // mcs, mcts
 let interval = 30 // used with setTimeout to resolve rendering blocking
 let nodeCount = 0
 
+let gAlphabetaCount = 0
+let gMTDfCount = 0
+
 /**
  * For UI
  */
@@ -31,7 +34,9 @@ const transpositionTable = new Map()
 
 function make3DrandomArray(x, y, z) {
   // 2 ** 53 - 1 is javascript limit, through 2 ** 64 is more desirable(require external lib)
-  const bound = Number.MAX_SAFE_INTEGER + 1
+  // FIXME: JavaScript uses 32 bits bitwise operands
+  // const bound = Number.MAX_SAFE_INTEGER
+  const bound = 2 ** 32
   return Array(x)
     .fill(0)
     .map((e) =>
@@ -518,6 +523,7 @@ function MTDF(f, depth) {
     // console.log(`MTDF: g ${g}, beta ${beta}, (${lowerBound},${upperBound})`) //test
   }
   console.log(`MTDF: nodeCount ${nodeCount}`)
+  gMTDfCount += nodeCount
   return {g, index}
 }
 
@@ -624,6 +630,7 @@ function alphabetaAI(playerIndex, depth, alpha, beta, isRoot = false) {
   }
 
   console.log('alphabetaAI: nodeCount', nodeCount)
+  gAlphabetaCount += nodeCount
   return {index, bestScore}
 }
 
