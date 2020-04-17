@@ -11,7 +11,7 @@ const players = ['B', 'W']
 // let human = [true, false]
 const human = [false, false]
 const ai = ['alphabeta', 'mtdf_id'] // 'random', 'alphabeta', 'mtdf', 'mtdf_id', 'mcs', 'mcts'
-const aiDepth = [5, 5] // alphabeta, mtdf, mtdf_id
+const aiDepth = [7, 7] // alphabeta, mtdf, mtdf_id
 const simulationRound = [500, 500] // mcs, mcts
 
 let interval = 30 // used with setTimeout to resolve rendering blocking
@@ -32,11 +32,18 @@ let history, scoreBoard
 const zobristTable = make3DrandomArray(8, 8, 2)
 const transpositionTable = new Map()
 
+/**
+ *
+ * @returns {*[][][]} BigInt type
+ */
 function make3DrandomArray(x, y, z) {
-  // 2 ** 53 - 1 is javascript limit, through 2 ** 64 is more desirable(require external lib)
-  // FIXME: JavaScript uses 32 bits bitwise operands
-  // const bound = Number.MAX_SAFE_INTEGER
-  const bound = 2 ** 32
+  // Attention
+  // 2 ** 53 - 1 is javascript Number type limit
+  // native JavaScript only uses 32 bits bitwise operands even for number larger than 32 bits
+  // ES2019 support BigInt but no method for randomly generating BigInt integer
+  // Math.random() does not support BigInt
+  // Solution: use BigInteger.js library to randomly generate a native BigInt (supported by modern browsers)
+  const bound = 2 ** 64
   return Array(x)
     .fill(0)
     .map((e) =>
@@ -45,20 +52,20 @@ function make3DrandomArray(x, y, z) {
         .map((e) =>
           Array(z)
             .fill(0)
-            .map((e) => Math.floor(Math.random() * bound))
+            .map((e) => bigInt.randBetween(0, bound).value)
         )
     )
 }
 
 // Zobrist Hashing
 function computeBoardHash() {
-  let h = 0
+  let h = 0n  // BigInt type
   for (let i = 0; i < 8; ++i) {
     for (let j = 0; j < 8; ++j) {
       let player = board[i][j]
       if (players.includes(player)) {
         let p = players.indexOf(player)
-        h ^= zobristTable[i][j][p]
+        h ^= zobristTable[i][j][p]  // BigInt type support XOR, no longer 32 bits limit
       }
     }
   }
