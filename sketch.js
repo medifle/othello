@@ -1,966 +1,124 @@
-'use strict'
-
-let board, reachableSpots, lastPlay, hash
-
-/**
- * For player
- */
-let counts // array
-let curPlayerIndex // current player index: 0 for Black, 1 for White
-const players = ['B', 'W']
-let human = [true, false]
-// const human = [false, false]
-const ai = ['alphabeta', 'mtdf_id'] // 'random', 'alphabeta', 'mtdf', 'mtdf_id', 'mcs', 'mcts'
-const aiDepth = [8, 8] // alphabeta, mtdf, mtdf_id
-const simulationRound = [500, 500] // mcs, mcts
-
-let interval = 30 // used with setTimeout to resolve rendering blocking
-let nodeCount = 0
-
-let globalAlphabetaCount = 0
-let globalMTDfIdCount = 0
-let localMTDfIdCount = 0
-
-/**
- * For UI
- */
-let squareWidth, squareHeight
-let history, scoreBoard
-
-/**
- * For transposition table
- */
-const zobristTable = make3DrandomArray(8, 8, 2)
-const transpositionTable = new Map()
-
-/**
- *
- * @returns {*[][][]} BigInt type
- */
-function make3DrandomArray(x, y, z) {
-  // Attention
-  // 2 ** 53 - 1 is javascript Number type limit
-  // native JavaScript only uses 32 bits bitwise operands even for number larger than 32 bits
-  // ES2019 support BigInt but no method for randomly generating BigInt integer
-  // Math.random() does not support BigInt
-  // Solution: use BigInteger.js library to randomly generate a native BigInt (supported by modern browsers)
-  const bound = 2 ** 64
-  return Array(x)
-    .fill(0)
-    .map((e) =>
-      Array(y)
-        .fill(0)
-        .map((e) =>
-          Array(z)
-            .fill(0)
-            .map((e) => bigInt.randBetween(0, bound).value)
-        )
-    )
-}
-
-// Zobrist Hashing
-function computeBoardHash() {
-  let h = 0n  // BigInt type
-  for (let i = 0; i < 8; ++i) {
-    for (let j = 0; j < 8; ++j) {
-      let player = board[i][j]
-      let playerIndex = players.indexOf(player)
-      if (playerIndex !== -1) {
-        h ^= zobristTable[i][j][playerIndex]  // BigInt type support XOR, no longer 32 bits limit
-      }
-    }
-  }
-  return h
-}
-
-function updateBoardHash(i, j, playerIndex) {
-  let prevPlayer = board[i][j]
-  let prevPlayerIndex = players.indexOf(prevPlayer)
-  if (prevPlayerIndex !== -1) {
-    hash ^= zobristTable[i][j][prevPlayerIndex]
-  }
-  hash ^= zobristTable[i][j][playerIndex]
-}
-
-function start() {
-  // default config
-  board = [
-    ['', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', ''],
-    ['', '', 'A', 'A', 'A', 'A', '', ''],
-    ['', '', 'A', 'W', 'B', 'A', '', ''],
-    ['', '', 'A', 'B', 'W', 'A', '', ''],
-    ['', '', 'A', 'A', 'A', 'A', '', ''],
-    ['', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', ''],
-  ]
-  counts = [2, 2]
-  lastPlay = [-1, -1]
-  reachableSpots = []
-  curPlayerIndex = 0
-
-  // init reachableSpots
-  for (let j = 0; j < 8; j++) {
-    for (let i = 0; i < 8; i++) {
-      if (board[i][j] === 'A') {
-        reachableSpots.push([i, j])
-      }
-    }
-  }
-  history.html('')
-  updateScoreBoard()
-
-  if (!human[curPlayerIndex]) {
-    setTimeout(nextTurn.bind(null, ai[curPlayerIndex]), interval)
-  }
-}
-
-function coreMove(i, j, playerIndex) {
-  if (hash) {
-    updateBoardHash(i, j, playerIndex)
-  }
-  // place disc
-  board[i][j] = players[playerIndex]
-  counts[playerIndex]++
-
-  updateReachableSpots(i, j, playerIndex)
-
-  let curPlayer = players[playerIndex]
-  let otherPlayer = players[playerIndex ^ 1]
-
-  // search radially
-  for (let dj = -1; dj <= 1; dj++) {
-    for (let di = -1; di <= 1; di++) {
-      if (di || dj) {
-        // 8 directions
-        let k = 1 // distance factor
-        while (getPlayer(i + di * k, j + dj * k) === otherPlayer) {
-          k++
-        }
-        if (k > 1 && getPlayer(i + di * k, j + dj * k) === curPlayer) {
-          // flip all the opponents in between
-          while (k > 1) {
-            k--
-            flipDisc(i + di * k, j + dj * k, playerIndex)
-          }
-        }
-      }
-    }
-  }
-}
-
-function move(i, j) {
-  coreMove(i, j, curPlayerIndex)
-  lastPlay[0] = i
-  lastPlay[1] = j
-  updateScoreBoard()
-  addList(`(${i + 1},${j + 1})`)
-}
-
-function isInBoard(i, j) {
-  return i >= 0 && i < 8 && j >= 0 && j < 8
-}
-
-function getPlayer(i, j) {
-  if (isInBoard(i, j)) {
-    return board[i][j]
-  }
-}
-
-function updateReachableSpots(i, j, playerIndex) {
-  for (let dj = -1; dj <= 1; dj++) {
-    let j2 = j + dj
-    for (let di = -1; di <= 1; di++) {
-      if (di || dj) {
-        let i2 = i + di
-        if (getPlayer(i2, j2) === '') {
-          reachableSpots.push([i2, j2])
-          board[i2][j2] = 'A'
-        }
-      }
-    }
-  }
-}
-
-function flipDisc(i, j, playerIndex) {
-  if (hash) {
-    updateBoardHash(i, j, playerIndex)
-  }
-  board[i][j] = players[playerIndex]
-  counts[playerIndex] += 1
-  counts[playerIndex ^ 1] -= 1
-}
-
-function isAvailablePlayer(i, j, playerIndex) {
-  let otherPlayer = players[playerIndex ^ 1]
-  const curPlayer = players[playerIndex]
-
-  // search radially
-  for (let dj = -1; dj <= 1; dj++) {
-    for (let di = -1; di <= 1; di++) {
-      // 8 directions
-      if (di || dj) {
-        let k = 1 // distance factor
-        while (getPlayer(i + di * k, j + dj * k) === otherPlayer) {
-          k++
-        }
-        if (k > 1 && getPlayer(i + di * k, j + dj * k) === curPlayer) {
-          return true
-        }
-      }
-    }
-  }
-  return false
-}
-
-function hasAvailablePlayer(playerIndex) {
-  for (let spot of reachableSpots) {
-    if (isAvailablePlayer(spot[0], spot[1], playerIndex)) {
-      return true
-    }
-  }
-  return false
-}
-
-function checkWinner() {
-  if (isGameOver()) {
-    if (counts[0] > counts[1]) {
-      return 'B'
-    } else if (counts[1] > counts[0]) {
-      return 'W'
-    } else {
-      return 'T' // tie
-    }
-  }
-}
-
-function randomAI() {
-  let index, spot
-  do {
-    index = floor(random(reachableSpots.length))
-    spot = reachableSpots[index]
-  } while (!isAvailablePlayer(spot[0], spot[1], curPlayerIndex))
-  return index
-}
-
-// [START heuristic evaluation]
-// Credits: Copper France
-function corners(playerIndex) {
-  let stable = []
-  const curPlayer = players[playerIndex]
-
-  // top-left corner
-  let m = 7
-  for (let j = 0; j < 7; j++) {
-    for (let i = 0; i < m; i++) {
-      if (board[i][j] !== curPlayer) {
-        m = i
-        break
-      } else {
-        stable[i * 8 + j] = true
-      }
-    }
-    if (m === 0) {
+"use strict"
+let board,reachableSpots,lastPlay,hash,counts,curPlayerIndex
+const players=["B","W"]
+let human=[!0,!1]
+const ai=["alphabeta","mtdf_id"],aiDepth=[8,8],simulationRound=[500,500]
+let squareWidth,squareHeight,history,scoreBoard,interval=30,nodeCount=0,globalAlphabetaCount=0,globalMTDfIdCount=0,localMTDfIdCount=0
+const zobristTable=make3DrandomArray(8,8,2),transpositionTable=new Map
+function make3DrandomArray(e,a,t){const r=Math.pow(2,64)
+  return Array(e).fill(0).map(e=>Array(a).fill(0).map(e=>Array(t).fill(0).map(e=>bigInt.randBetween(0,r).value)))}function computeBoardHash(){let e=BigInt(0)
+  for(let a=0;a<8;++a)for(let t=0;t<8;++t){let r=board[a][t],o=players.indexOf(r);-1!==o&&(e^=zobristTable[a][t][o])}return e}function updateBoardHash(e,a,t){let r=board[e][a],o=players.indexOf(r);-1!==o&&(hash^=zobristTable[e][a][o]),hash^=zobristTable[e][a][t]}function start(){board=[["","","","","","","",""],["","","","","","","",""],["","","A","A","A","A","",""],["","","A","W","B","A","",""],["","","A","B","W","A","",""],["","","A","A","A","A","",""],["","","","","","","",""],["","","","","","","",""]],counts=[2,2],lastPlay=[-1,-1],reachableSpots=[],curPlayerIndex=0
+  for(let e=0;e<8;e++)for(let a=0;a<8;a++)"A"===board[a][e]&&reachableSpots.push([a,e])
+  history.html(""),updateScoreBoard(),human[curPlayerIndex]||setTimeout(nextTurn.bind(null,ai[curPlayerIndex]),interval)}function coreMove(e,a,t){hash&&updateBoardHash(e,a,t),board[e][a]=players[t],counts[t]++,updateReachableSpots(e,a,t)
+  let r=players[t],o=players[1^t]
+  for(let l=-1;l<=1;l++)for(let n=-1;n<=1;n++)if(n||l){let s=1
+    for(;getPlayer(e+n*s,a+l*s)===o;)s++
+    if(s>1&&getPlayer(e+n*s,a+l*s)===r)for(;s>1;)flipDisc(e+n*--s,a+l*s,t)}}function move(e,a){coreMove(e,a,curPlayerIndex),lastPlay[0]=e,lastPlay[1]=a,updateScoreBoard(),addList(`(${e+1},${a+1})`)}function isInBoard(e,a){return e>=0&&e<8&&a>=0&&a<8}function getPlayer(e,a){if(isInBoard(e,a))return board[e][a]}function updateReachableSpots(e,a,t){for(let t=-1;t<=1;t++){let r=a+t
+  for(let a=-1;a<=1;a++)if(a||t){let t=e+a
+    ""===getPlayer(t,r)&&(reachableSpots.push([t,r]),board[t][r]="A")}}}function flipDisc(e,a,t){hash&&updateBoardHash(e,a,t),board[e][a]=players[t],counts[t]+=1,counts[1^t]-=1}function isAvailablePlayer(e,a,t){let r=players[1^t]
+  const o=players[t]
+  for(let t=-1;t<=1;t++)for(let l=-1;l<=1;l++)if(l||t){let n=1
+    for(;getPlayer(e+l*n,a+t*n)===r;)n++
+    if(n>1&&getPlayer(e+l*n,a+t*n)===o)return!0}return!1}function hasAvailablePlayer(e){for(let a of reachableSpots)if(isAvailablePlayer(a[0],a[1],e))return!0
+  return!1}function checkWinner(){if(isGameOver())return counts[0]>counts[1]?"B":counts[1]>counts[0]?"W":"T"}function randomAI(){let e,a
+  do{e=floor(random(reachableSpots.length)),a=reachableSpots[e]}while(!isAvailablePlayer(a[0],a[1],curPlayerIndex))
+  return e}function corners(e){let a=[]
+  const t=players[e]
+  let r=7
+  for(let e=0;e<7;e++){for(let o=0;o<r;o++){if(board[o][e]!==t){r=o
+    break}a[8*o+e]=!0}if(0===r)break}r=7
+  for(let e=7;e>0;e--){for(let o=0;o<r;o++){if(board[o][e]!==t){r=o
+    break}a[8*o+e]=!0}if(0===r)break}r=0
+  for(let e=0;e<7;e--){for(let o=7;o>r;o--){if(board[o][e]!==t){r=o
+    break}a[8*o+e]=!0}if(7===r)break}r=0
+  for(let e=7;e>0;e--){for(let o=7;o>r;o--){if(board[o][e]!==t){r=o
+    break}a[8*o+e]=!0}if(7===r)break}return a.filter(e=>e).length}function countAvailablePlayer(e){let a=0
+  for(let t of reachableSpots)isAvailablePlayer(t[0],t[1],e)&&(a+=1)
+  return a}function evaluate(e=!1){const a=1^curPlayerIndex
+  return e?counts[curPlayerIndex]>counts[a]?1e6+counts[curPlayerIndex]:counts[a]>counts[curPlayerIndex]?-1e6-counts[a]:0:1e4*(corners(curPlayerIndex)-corners(a))+100*(countAvailablePlayer(curPlayerIndex)-countAvailablePlayer(a))+(counts[curPlayerIndex]-counts[a])}function isGameOver(){return!hasAvailablePlayer(0)&&!hasAvailablePlayer(1)}function expand(e){const a=[]
+  for(let t=0;t<reachableSpots.length;t++){let r=reachableSpots[t]
+    isAvailablePlayer(r[0],r[1],e)&&a.push(r.concat(t))}return a}function alphabetaMemo(e,a,t,r,o=!1){const l=transpositionTable.get(hash)
+  if(l&&l.depth>=a){const{lowerbound:e,upperbound:a}=l
+    if(e){if(e>=r)return o?{index:l.index,bestScore:e}:e
+      t=max(t,e)}if(a){if(a<=t)return o?{index:l.index,bestScore:a}:a
+      r=min(r,a)}}if(isGameOver())return evaluate(!0)
+  if(0===a)return evaluate()
+  let n=expand(e)
+  if(0===n.length)return evaluate()
+  const s=[...reachableSpots],i=board.map(e=>e.slice(0)),c=[...counts],u=hash
+  let d,h,f,p=-1
+  if(e===curPlayerIndex){d=-1/0,h=t
+    for(let t of n){nodeCount+=1
+      let o=t[2]
+      reachableSpots.splice(o,1),coreMove(t[0],t[1],e)
+      let l=alphabetaMemo(1^e,a-1,h,r)
+      if(l>d&&(d=l,p=o),reachableSpots=[...s],board=i.map(e=>e.slice(0)),counts=[...c],hash=u,(h=max(h,l))>=r)break}}else{d=1/0,f=r
+    for(let r of n){nodeCount+=1
+      let o=r[2]
+      reachableSpots.splice(o,1),coreMove(r[0],r[1],e)
+      let l=alphabetaMemo(1^e,a-1,t,f)
+      if(l<d&&(d=l,p=o),reachableSpots=[...s],board=i.map(e=>e.slice(0)),counts=[...c],hash=u,t>=(f=min(f,l)))break}}return d<=t&&transpositionTable.set(hash,{depth:a,upperbound:d,index:p}),d>t&&d<r&&transpositionTable.set(hash,{depth:a,upperbound:d,lowerbound:d,index:p}),d>=r&&transpositionTable.set(hash,{depth:a,lowerbound:d,index:p}),o?{index:p,bestScore:d}:d}function MTDF(e,a){let t,r
+  nodeCount=0
+  let o=e,l=1/0,n=-1/0
+  for(hash=computeBoardHash();n<l;)t=max(o,n+1),({bestScore:o,index:r}=alphabetaMemo(curPlayerIndex,a,t-1,t,!0)),o<t?l=o:n=o
+  return localMTDfIdCount+=nodeCount,{g:o,index:r}}function MTDF_ID(e){localMTDfIdCount=0
+  let a,t=0,r=0,o=!1
+  for(let l=1;l<=e;++l)o?({g:t,index:a}=MTDF(t,l)):({g:r,index:a}=MTDF(r,l)),o=!o
+  return console.log("MTDF_ID: nodeCount",localMTDfIdCount),globalMTDfIdCount+=localMTDfIdCount,a}function alphabetaAI(e,a,t,r,o=!1){if(o&&(nodeCount=0),isGameOver())return evaluate(!0)
+  if(0===a)return evaluate()
+  let l=expand(e)
+  if(0===l.length)return evaluate()
+  const n=[...reachableSpots],s=board.map(e=>e.slice(0)),i=[...counts]
+  let c,u=-1
+  if(e===curPlayerIndex){c=-1/0
+    for(let o of l){nodeCount+=1
+      let l=o[2]
+      reachableSpots.splice(l,1),coreMove(o[0],o[1],e)
+      let d=alphabetaAI(1^e,a-1,t,r)
+      if(d>c&&(c=d,u=l),reachableSpots=[...n],board=s.map(e=>e.slice(0)),counts=[...i],(t=max(t,d))>=r)break}}else{c=1/0
+    for(let o of l){nodeCount+=1
+      let l=o[2]
+      reachableSpots.splice(l,1),coreMove(o[0],o[1],e)
+      let d=alphabetaAI(1^e,a-1,t,r)
+      if(d<c&&(c=d,u=l),reachableSpots=[...n],board=s.map(e=>e.slice(0)),counts=[...i],t>=(r=min(r,d)))break}}return o?(console.log("alphabetaAI: nodeCount",nodeCount),globalAlphabetaCount+=nodeCount,{index:u,bestScore:c}):c}function MCS_simulate(e,a){const t=[...reachableSpots],r=board.map(e=>e.slice(0)),o=[...counts]
+  let l=a,n=0
+  for(let a=0;a<e;++a){for(;!isGameOver();){let e=expand(l)
+    if(e.length>0){let a=random(e),t=a[2]
+      reachableSpots.splice(t,1),coreMove(a[0],a[1],l)}l^=1}checkWinner()===players[curPlayerIndex]&&(n+=1),reachableSpots=[...t],board=r.map(e=>e.slice(0)),counts=[...o]}return n/e}function MCS(e){let a=curPlayerIndex,t=-1/0,r=-1
+  const o=[...reachableSpots],l=board.map(e=>e.slice(0)),n=[...counts]
+  let s=expand(a)
+  for(let i of s){let s=i[2]
+    reachableSpots.splice(s,1),coreMove(i[0],i[1],a)
+    let c=MCS_simulate(e,1^a)
+    c>t&&(t=c,r=s),reachableSpots=[...o],board=l.map(e=>e.slice(0)),counts=[...n]}return console.log(`MCS score ${t}`),r}function nextTurn(e="random"){let a=!1
+  if(hasAvailablePlayer(curPlayerIndex)){if(human[curPlayerIndex])return
+    let a
+    const t=performance.now()
+    switch(e){case"random":a=randomAI()
       break
-    }
-  }
-
-  // bottom-left corner
-  m = 7
-  for (let j = 7; j > 0; j--) {
-    for (let i = 0; i < m; i++) {
-      if (board[i][j] !== curPlayer) {
-        m = i
+      case"alphabeta":({index:a}=alphabetaAI(curPlayerIndex,aiDepth[curPlayerIndex],-1/0,1/0,!0))
         break
-      } else {
-        stable[i * 8 + j] = true
-      }
-    }
-    if (m === 0) {
+      case"mtdf":({index:a}=MTDF(0,aiDepth[curPlayerIndex]))
+        break
+      case"mtdf_id":a=MTDF_ID(aiDepth[curPlayerIndex])
+        break
+      case"mcs":shuffle(reachableSpots,!0),a=MCS(simulationRound[curPlayerIndex])}const r=performance.now()
+    console.log(`${e} lapse:`,r-t)
+    let o=reachableSpots.splice(a,1)[0]
+    move(o[0],o[1])}else a=!0
+  let t=checkWinner()
+  t?addFinalResult(gameResultToText(t)):(a&&addList("pass"),curPlayerIndex^=1,setTimeout(nextTurn.bind(null,ai[curPlayerIndex]),interval))}function gameResultToText(e){let a=""
+  switch(e){case"B":a="Black wins"
+    break
+    case"W":a="White wins"
       break
-    }
-  }
-
-  // top-right corner
-  m = 0
-  for (let j = 0; j < 7; j--) {
-    for (let i = 7; i > m; i--) {
-      if (board[i][j] !== curPlayer) {
-        m = i
-        break
-      } else {
-        stable[i * 8 + j] = true
-      }
-    }
-    if (m === 7) {
-      break
-    }
-  }
-
-  // bottom-right corner
-  m = 0
-  for (let j = 7; j > 0; j--) {
-    for (let i = 7; i > m; i--) {
-      if (board[i][j] !== curPlayer) {
-        m = i
-        break
-      } else {
-        stable[i * 8 + j] = true
-      }
-    }
-    if (m === 7) {
-      break
-    }
-  }
-
-  return stable.filter((s) => s).length
-}
-
-function countAvailablePlayer(playerIndex) {
-  let count = 0
-  for (let spot of reachableSpots) {
-    if (isAvailablePlayer(spot[0], spot[1], playerIndex)) {
-      count += 1
-    }
-  }
-  return count
-}
-
-function evaluate(isEnd = false) {
-  const otherPlayerIndex = curPlayerIndex ^ 1
-  if (isEnd) {
-    if (counts[curPlayerIndex] > counts[otherPlayerIndex]) {
-      return 1000000 + counts[curPlayerIndex]
-    } else if (counts[otherPlayerIndex] > counts[curPlayerIndex]) {
-      return -1000000 - counts[otherPlayerIndex]
-    } else {
-      return 0
-    }
-  }
-
-  return (
-    (corners(curPlayerIndex) - corners(otherPlayerIndex)) * 10000 +
-    (countAvailablePlayer(curPlayerIndex) -
-      countAvailablePlayer(otherPlayerIndex)) *
-      100 +
-    (counts[curPlayerIndex] - counts[otherPlayerIndex])
-  )
-}
-// [END heuristic evaluation]
-
-function isGameOver() {
-  return !hasAvailablePlayer(0) && !hasAvailablePlayer(1)
-}
-
-/**
- * Generate children nodes (virtual)
- *
- * @param playerIndex
- * @returns {[]} [spot[0], spot[1], spotIndex]
- */
-function expand(playerIndex) {
-  const children = []
-  for (let spotIndex = 0; spotIndex < reachableSpots.length; spotIndex++) {
-    let spot = reachableSpots[spotIndex]
-    if (isAvailablePlayer(spot[0], spot[1], playerIndex)) {
-      children.push(spot.concat(spotIndex))
-    }
-  }
-  return children
-}
-
-// AlphaBetaWithMemory
-// https://people.csail.mit.edu/plaat/mtdf.html#abmem
-// https://github.com/jennydvr/Othello/blob/master/alphabetapr.cpp
-// https://www.gamedev.net/forums/topic.asp?topic_id=503234
-function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
-  // [START check transposition table]
-  const store = transpositionTable.get(hash)
-  if (store && store.depth >= depth) {
-    const {lowerbound, upperbound} = store
-    if (lowerbound) {
-      if (lowerbound >= beta) {
-        if (isRoot) {
-          return {index: store.index, bestScore: lowerbound}
-        }
-        return lowerbound
-      }
-      alpha = max(alpha, lowerbound)
-    }
-    if (upperbound) {
-      if (upperbound <= alpha) {
-        if (isRoot) {
-          return {index: store.index, bestScore: upperbound}
-        }
-        return upperbound
-      }
-      beta = min(beta, upperbound)
-    }
-  }
-  // [END check transposition table]
-
-  if (isGameOver()) {
-    return evaluate(true)
-  }
-  if (depth === 0) {
-    return evaluate()
-  }
-  // generate children
-  let children = expand(playerIndex)
-  // if children is empty, return evaluated score
-  // this is possible even we have isGameOver() check above:
-  // when this player has no children but the opponent has at least one child
-  if (children.length === 0) {
-    return evaluate()
-  }
-
-  const saveReachableSpots = [...reachableSpots]
-  const saveBoard = board.map((e) => e.slice(0)) // clone 2d array with primitive value
-  const saveCounts = [...counts]
-  const saveHash = hash
-
-  let index = -1
-  let bestScore, a, b
-  // Max node
-  if (playerIndex === curPlayerIndex) {
-    bestScore = -Infinity
-    a = alpha /* save original alpha value */
-    for (let child of children) {
-      nodeCount += 1
-      let spotIndex = child[2]
-      // modify
-      reachableSpots.splice(spotIndex, 1)
-      coreMove(child[0], child[1], playerIndex)
-      let score = alphabetaMemo(playerIndex ^ 1, depth - 1, a, beta)
-
-      // note that if all children return the same score, the order of reachableSpots matters
-      // that's why we shuffle reachableSpots in nextTurn()
-      if (score > bestScore) {
-        bestScore = score
-        index = spotIndex
-      }
-      // restore
-      reachableSpots = [...saveReachableSpots]
-      board = saveBoard.map((e) => e.slice(0)) // deep restore
-      counts = [...saveCounts]
-      hash = saveHash
-
-      a = max(a, score)
-      // cut-off
-      if (a >= beta) {
-        break
-      }
-    }
-  }
-  // Min node
-  else {
-    bestScore = Infinity
-    b = beta /* save original beta value */
-    for (let child of children) {
-      nodeCount += 1
-      let spotIndex = child[2]
-      // modify
-      reachableSpots.splice(spotIndex, 1)
-      coreMove(child[0], child[1], playerIndex)
-      let score = alphabetaMemo(playerIndex ^ 1, depth - 1, alpha, b)
-      if (score < bestScore) {
-        bestScore = score
-        index = spotIndex
-      }
-      // restore
-      reachableSpots = [...saveReachableSpots]
-      board = saveBoard.map((e) => e.slice(0)) // deep restore
-      counts = [...saveCounts]
-      hash = saveHash
-
-      b = min(b, score)
-      // cut-off
-      if (alpha >= b) {
-        break
-      }
-    }
-  }
-
-  // [START check table]
-  /* Fail low result implies an upper bound */
-  if (bestScore <= alpha) {
-    transpositionTable.set(hash, {
-      depth: depth,
-      upperbound: bestScore,
-      index,
-    })
-  }
-  /* Found an accurate minimax value - will not occur if called with zero window */
-  if (bestScore > alpha && bestScore < beta) {
-    transpositionTable.set(hash, {
-      depth: depth,
-      upperbound: bestScore,
-      lowerbound: bestScore,
-      index,
-    })
-  }
-  /* Fail high result implies a lower bound */
-  if (bestScore >= beta) {
-    transpositionTable.set(hash, {
-      depth: depth,
-      lowerbound: bestScore,
-      index,
-    })
-  }
-  // [END check table]
-
-  if (!isRoot) {
-    return bestScore
-  }
-
-  return {index, bestScore}
-}
-
-/**
- * https://people.csail.mit.edu/plaat/mtdf.html
- * https://en.wikipedia.org/wiki/MTD-f
- *
- * @param f first guess for best value
- * @param depth
- */
-function MTDF(f, depth) {
-  nodeCount = 0
-
-  let beta, index
-  let g = f
-  let upperBound = Infinity
-  let lowerBound = -Infinity
-
-  hash = computeBoardHash()
-
-  while (lowerBound < upperBound) {
-    beta = max(g, lowerBound + 1)
-    ;({bestScore: g, index} = alphabetaMemo(
-      curPlayerIndex,
-      depth,
-      beta - 1,
-      beta,
-      true
-    ))
-    if (g < beta) {
-      upperBound = g
-    } else {
-      lowerBound = g
-    }
-    // console.log(`MTDF: g ${g}, beta ${beta}, (${lowerBound},${upperBound})`) //test
-  }
-  localMTDfIdCount += nodeCount
-  return {g, index}
-}
-
-/**
- * MTDF with Iterative Deepening
- * https://people.csail.mit.edu/plaat/mtdf.html
- *
- * @param depth max search depth
- */
-function MTDF_ID(depth) {
-  localMTDfIdCount = 0
-  let evenFirstGuess = 0
-  let oddFirstGuess = 0
-  let index
-  let isEvenPly = false
-  for (let d = 1; d <= depth; ++d) {
-    if (isEvenPly) {
-      ;({g: evenFirstGuess, index} = MTDF(evenFirstGuess, d))
-    } else {
-      ;({g: oddFirstGuess, index} = MTDF(oddFirstGuess, d))
-    }
-    isEvenPly = !isEvenPly
-  }
-  console.log('MTDF_ID: nodeCount', localMTDfIdCount)
-  globalMTDfIdCount += localMTDfIdCount
-  return index
-}
-
-function alphabetaAI(playerIndex, depth, alpha, beta, isRoot = false) {
-  if (isRoot) nodeCount = 0
-
-  if (isGameOver()) {
-    return evaluate(true)
-  }
-  if (depth === 0) {
-    return evaluate()
-  }
-  // generate children
-  let children = expand(playerIndex)
-  // if children is empty, return evaluated score
-  // this is possible even we have isGameOver() check above:
-  // when this player has no children but the opponent has at least one child
-  if (children.length === 0) {
-    return evaluate()
-  }
-
-  const saveReachableSpots = [...reachableSpots]
-  const saveBoard = board.map((e) => e.slice(0)) // clone 2d array with primitive value
-  const saveCounts = [...counts]
-
-  let index = -1
-  let bestScore
-  // Max node
-  if (playerIndex === curPlayerIndex) {
-    bestScore = -Infinity
-    for (let child of children) {
-      nodeCount += 1
-      let spotIndex = child[2]
-      // modify
-      reachableSpots.splice(spotIndex, 1)
-      coreMove(child[0], child[1], playerIndex)
-      let score = alphabetaAI(playerIndex ^ 1, depth - 1, alpha, beta)
-
-      // note that if all children return the same score, the order of reachableSpots matters
-      // that's why we shuffle reachableSpots in nextTurn()
-      if (score > bestScore) {
-        bestScore = score
-        index = spotIndex
-      }
-      // restore
-      reachableSpots = [...saveReachableSpots]
-      board = saveBoard.map((e) => e.slice(0)) // deep restore
-      counts = [...saveCounts]
-
-      alpha = max(alpha, score)
-      // cut-off
-      if (alpha >= beta) {
-        break
-      }
-    }
-  }
-  // Min node
-  else {
-    bestScore = Infinity
-    for (let child of children) {
-      nodeCount += 1
-      let spotIndex = child[2]
-      // modify
-      reachableSpots.splice(spotIndex, 1)
-      coreMove(child[0], child[1], playerIndex)
-      let score = alphabetaAI(playerIndex ^ 1, depth - 1, alpha, beta)
-      if (score < bestScore) {
-        bestScore = score
-        index = spotIndex
-      }
-      // restore
-      reachableSpots = [...saveReachableSpots]
-      board = saveBoard.map((e) => e.slice(0)) // deep restore
-      counts = [...saveCounts]
-
-      beta = min(beta, score)
-      // cut-off
-      if (alpha >= beta) {
-        break
-      }
-    }
-  }
-  if (!isRoot) {
-    return bestScore
-  }
-
-  console.log('alphabetaAI: nodeCount', nodeCount)
-  globalAlphabetaCount += nodeCount
-  return {index, bestScore}
-}
-
-/**
- * Monte-Carlo search simulation
- */
-function MCS_simulate(n, playerIndex) {
-  // save game state
-  const saveReachableSpots = [...reachableSpots]
-  const saveBoard = board.map((e) => e.slice(0)) // clone 2d array with primitive value
-  const saveCounts = [...counts]
-
-  let pIndex = playerIndex
-  let count = 0
-  for (let i = 0; i < n; ++i) {
-    while (!isGameOver()) {
-      let children = expand(pIndex)
-      if (children.length > 0) {
-        let chosenChild = random(children)
-        let spotIndex = chosenChild[2]
-        // make move
-        reachableSpots.splice(spotIndex, 1)
-        coreMove(chosenChild[0], chosenChild[1], pIndex)
-      }
-      pIndex = pIndex ^ 1
-    }
-    if (checkWinner() === players[curPlayerIndex]) {
-      count += 1
-    }
-    // restore
-    reachableSpots = [...saveReachableSpots]
-    board = saveBoard.map((e) => e.slice(0)) // deep restore
-    counts = [...saveCounts]
-  }
-  return count / n
-}
-
-/**
- * pure Monte-Carlo search
- *
- * @param n simulation rounds
- */
-function MCS(n) {
-  let playerIndex = curPlayerIndex
-  let bestScore = -Infinity
-  let index = -1 // the index associated with bestScore
-
-  // save game state
-  const saveReachableSpots = [...reachableSpots]
-  const saveBoard = board.map((e) => e.slice(0)) // clone 2d array with primitive value
-  const saveCounts = [...counts]
-
-  let children = expand(playerIndex)
-  for (let child of children) {
-    let spotIndex = child[2]
-    // modify (make move)
-    reachableSpots.splice(spotIndex, 1)
-    coreMove(child[0], child[1], playerIndex)
-
-    let score = MCS_simulate(n, playerIndex ^ 1)
-    if (score > bestScore) {
-      bestScore = score
-      index = spotIndex
-    }
-    // restore
-    reachableSpots = [...saveReachableSpots]
-    board = saveBoard.map((e) => e.slice(0)) // deep restore
-    counts = [...saveCounts]
-  }
-  console.log(`MCS score ${bestScore}`)//test
-  return index
-}
-
-function nextTurn(algo = 'random') {
-  let notAvailable = false
-  if (hasAvailablePlayer(curPlayerIndex)) {
-    if (human[curPlayerIndex]) {
-      return
-    }
-    let index
-
-    const start_check = performance.now()//test
-    switch (algo) {
-      case 'random':
-        index = randomAI()
-        break
-      case 'alphabeta':
-        // shuffle(reachableSpots, true)
-        ;({index} = alphabetaAI(
-          curPlayerIndex,
-          aiDepth[curPlayerIndex],
-          -Infinity,
-          Infinity,
-          true
-        ))
-        break
-      case 'mtdf':
-        // shuffle(reachableSpots, true)
-        ;({index} = MTDF(0, aiDepth[curPlayerIndex]))
-        break
-      case 'mtdf_id':
-        // shuffle(reachableSpots, true)
-        index = MTDF_ID(aiDepth[curPlayerIndex])
-        break
-      case 'mcs':
-        shuffle(reachableSpots, true)
-        index = MCS(simulationRound[curPlayerIndex])
-        break
-    }
-    const end_check = performance.now()//test
-    console.log(`${algo} lapse:`, end_check - start_check)//test
-
-    let spot = reachableSpots.splice(index, 1)[0]
-    move(spot[0], spot[1])
-  } else {
-    notAvailable = true
-  }
-
-  let result = checkWinner()
-  if (result) {
-    addFinalResult(gameResultToText(result))
-  } else {
-    if (notAvailable) {
-      addList('pass')
-    }
-    // change player
-    curPlayerIndex = curPlayerIndex ^ 1
-    setTimeout(nextTurn.bind(null, ai[curPlayerIndex]), interval)
-  }
-}
-
-function gameResultToText(result) {
-  let resultText = ''
-  switch (result) {
-    case 'B':
-      resultText = 'Black wins'
-      break
-    case 'W':
-      resultText = 'White wins'
-      break
-    case 'T':
-      resultText = 'Tie!'
-  }
-  return resultText
-}
-
-/**
- * For debug: fast move
- * start from black, index start from 1
- * @param moveArr e.g. [[5,6],[6,4]]
- */
-function loadState(moveArr) {
-  for (let _move of moveArr) {
-    let index = reachableSpots.findIndex(
-      (e) => e[0] === _move[0] - 1 && e[1] === _move[1] - 1
-    )
-    reachableSpots.splice(index, 1)[0]
-    move(_move[0] - 1, _move[1] - 1)
-    curPlayerIndex = curPlayerIndex ^ 1
-  }
-}
-
-/**
- * UI
- */
-function addFinalResult(result) {
-  scoreBoard.elt.innerHTML += `<br/>${result}`
-}
-
-function addList(text) {
-  let div = createDiv(`${players[curPlayerIndex]}:${text}`)
-  history.child(div)
-  history.elt.scrollTop = history.elt.scrollHeight // keep showing the latest item
-}
-
-function updateScoreBoard() {
-  scoreBoard.html(
-    `Black: ${counts[0]} &nbsp;&nbsp;&nbsp;-&nbsp;&nbsp;&nbsp; White: ${counts[1]}`
-  )
-}
-
-function mousePressed() {
-  if (human[curPlayerIndex]) {
-    let i = floor((mouseX - squareWidth / 2) / squareWidth)
-    let j = floor((mouseY - squareHeight / 2) / squareHeight)
-    if (isInBoard(i, j)) {
-      let index = reachableSpots.findIndex(
-        (spot) => spot[0] === i && spot[1] === j
-      )
-      if (index >= 0) {
-        if (isAvailablePlayer(i, j, curPlayerIndex)) {
-          reachableSpots.splice(index, 1) // remove it from reachableSpots
-          move(i, j)
-          curPlayerIndex = curPlayerIndex ^ 1
-          setTimeout(nextTurn.bind(null, ai[curPlayerIndex]), interval)
-        }
-      }
-    }
-  }
-}
-
-function setup() {
-  createCanvas(432, 432)
-
-  frameRate(30)
-  squareWidth = width / 9
-  squareHeight = height / 9
-
-  // history style
-  history = createDiv()
-  history.position(460, squareHeight / 2)
-  history.size(110, 480)
-  history.style('border', 'black 1px solid')
-  history.style('padding', '4px')
-  history.style('box-sizing', 'border-box')
-  history.style('font-family', 'monospace')
-  history.style('font-size', '20px')
-  history.style('overflow-y', 'scroll')
-
-  // scoreBoard style
-  scoreBoard = createDiv()
-  scoreBoard.style('font-size', '32px')
-  scoreBoard.style('font-weight', '300')
-  scoreBoard.style('text-align', 'center')
-  scoreBoard.style('width', `${width}px`)
-  scoreBoard.position(0, height)
-
-  start()
-}
-
-// [START hint config]
-let hint = true
-let fadeLowerBound = 15
-let fadeUpperBound = 100
-let fade = fadeLowerBound
-let fadeSpeed = 0.45
-// [END hint config]
-
-function draw() {
-  background(244, 248, 252)
-
-  // for coordinate labels
-  rectMode(CORNER)
-  noStroke()
-  fill(0)
-  textSize(squareHeight * 0.4)
-  textAlign(CENTER, CENTER)
-  for (let i = 0; i < 8; i++) {
-    text(i + 1, squareWidth / 4, squareHeight * i + squareHeight)
-    text(i + 1, squareWidth * i + squareWidth, squareHeight / 4)
-  }
-
-  // for game board
+    case"T":a="Tie!"}return a}function loadState(e){for(let a of e){let e=reachableSpots.findIndex(e=>e[0]===a[0]-1&&e[1]===a[1]-1)
+  reachableSpots.splice(e,1)[0],move(a[0]-1,a[1]-1),curPlayerIndex^=1}}function addFinalResult(e){scoreBoard.elt.innerHTML+=`<br/>${e}`}function addList(e){let a=createDiv(`${players[curPlayerIndex]}:${e}`)
+  history.child(a),history.elt.scrollTop=history.elt.scrollHeight}function updateScoreBoard(){scoreBoard.html(`Black: ${counts[0]} &nbsp;&nbsp;&nbsp;-&nbsp;&nbsp;&nbsp; White: ${counts[1]}`)}function mousePressed(){if(human[curPlayerIndex]){let e=floor((mouseX-squareWidth/2)/squareWidth),a=floor((mouseY-squareHeight/2)/squareHeight)
+  if(isInBoard(e,a)){let t=reachableSpots.findIndex(t=>t[0]===e&&t[1]===a)
+    t>=0&&isAvailablePlayer(e,a,curPlayerIndex)&&(reachableSpots.splice(t,1),move(e,a),curPlayerIndex^=1,setTimeout(nextTurn.bind(null,ai[curPlayerIndex]),interval))}}}function setup(){createCanvas(432,432),frameRate(30),squareWidth=width/9,squareHeight=height/9,(history=createDiv()).position(460,squareHeight/2),history.size(110,480),history.style("border","black 1px solid"),history.style("padding","4px"),history.style("box-sizing","border-box"),history.style("font-family","monospace"),history.style("font-size","20px"),history.style("overflow-y","scroll"),(scoreBoard=createDiv()).style("font-size","32px"),scoreBoard.style("font-weight","300"),scoreBoard.style("text-align","center"),scoreBoard.style("width",`${width}px`),scoreBoard.position(0,height),start()}let hint=!0,fadeLowerBound=15,fadeUpperBound=100,fade=fadeLowerBound,fadeSpeed=.45
+function draw(){background(244,248,252),rectMode(CORNER),noStroke(),fill(0),textSize(.4*squareHeight),textAlign(CENTER,CENTER)
+  for(let e=0;e<8;e++)text(e+1,squareWidth/4,squareHeight*e+squareHeight),text(e+1,squareWidth*e+squareWidth,squareHeight/4)
   rectMode(CENTER)
-  for (let j = 0; j < 8; j++) {
-    for (let i = 0; i < 8; i++) {
-      let x = squareWidth * i + squareWidth
-      let y = squareHeight * j + squareHeight
-      let spot = board[i][j]
-      strokeWeight(2)
-      stroke(0)
-      if (spot === '') {
-        fill(0, 102, 50)
-      } else {
-        fill(0, 153, 76)
-      }
-      rect(x, y, squareWidth, squareHeight)
-      if (spot === players[0]) {
-        noStroke()
-        fill(0)
-        ellipse(x, y, squareWidth * 0.75)
-      } else if (spot === players[1]) {
-        noStroke()
-        fill(255)
-        ellipse(x, y, squareWidth * 0.75)
-      } else if (
-        human[curPlayerIndex] &&
-        isAvailablePlayer(i, j, curPlayerIndex)
-      ) {
-        if (hint) {
-          stroke(102, 102, 102, fade)
-          if (fade < fadeLowerBound || fade > fadeUpperBound) {
-            fadeSpeed *= -1
-          }
-          fade += fadeSpeed
-
-          ellipse(x, y, squareWidth * 0.5)
-          noFill()
-          ellipse(x, y, squareWidth * 0.7)
-        }
-      }
-
-      if (i === lastPlay[0] && j === lastPlay[1]) {
-        strokeWeight(1.5)
-        stroke(244, 67, 54, 210)
-        noFill()
-        ellipse(x, y, squareWidth * 0.75)
-      }
-    }
-  }
-}
+  for(let e=0;e<8;e++)for(let a=0;a<8;a++){let t=squareWidth*a+squareWidth,r=squareHeight*e+squareHeight,o=board[a][e]
+    strokeWeight(2),stroke(0),""===o?fill(0,102,50):fill(0,153,76),rect(t,r,squareWidth,squareHeight),o===players[0]?(noStroke(),fill(0),ellipse(t,r,.75*squareWidth)):o===players[1]?(noStroke(),fill(255),ellipse(t,r,.75*squareWidth)):human[curPlayerIndex]&&isAvailablePlayer(a,e,curPlayerIndex)&&hint&&(stroke(102,102,102,fade),(fade<fadeLowerBound||fade>fadeUpperBound)&&(fadeSpeed*=-1),fade+=fadeSpeed,ellipse(t,r,.5*squareWidth),noFill(),ellipse(t,r,.7*squareWidth)),a===lastPlay[0]&&e===lastPlay[1]&&(strokeWeight(1.5),stroke(244,67,54,210),noFill(),ellipse(t,r,.75*squareWidth))}}
