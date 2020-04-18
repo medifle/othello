@@ -1,6 +1,6 @@
 'use strict'
 
-let board, reachableSpots, lastPlay
+let board, reachableSpots, lastPlay, hash
 
 /**
  * For player
@@ -11,14 +11,15 @@ const players = ['B', 'W']
 // let human = [true, false]
 const human = [false, false]
 const ai = ['alphabeta', 'mtdf_id'] // 'random', 'alphabeta', 'mtdf', 'mtdf_id', 'mcs', 'mcts'
-const aiDepth = [7, 7] // alphabeta, mtdf, mtdf_id
+const aiDepth = [8, 8] // alphabeta, mtdf, mtdf_id
 const simulationRound = [500, 500] // mcs, mcts
 
 let interval = 30 // used with setTimeout to resolve rendering blocking
 let nodeCount = 0
 
-let gAlphabetaCount = 0
-let gMTDfCount = 0
+let globalAlphabetaCount = 0
+let globalMTDfIdCount = 0
+let localMTDfIdCount = 0
 
 /**
  * For UI
@@ -63,13 +64,22 @@ function computeBoardHash() {
   for (let i = 0; i < 8; ++i) {
     for (let j = 0; j < 8; ++j) {
       let player = board[i][j]
-      if (players.includes(player)) {
-        let p = players.indexOf(player)
-        h ^= zobristTable[i][j][p]  // BigInt type support XOR, no longer 32 bits limit
+      let playerIndex = players.indexOf(player)
+      if (playerIndex !== -1) {
+        h ^= zobristTable[i][j][playerIndex]  // BigInt type support XOR, no longer 32 bits limit
       }
     }
   }
   return h
+}
+
+function updateBoardHash(i, j, playerIndex) {
+  let prevPlayer = board[i][j]
+  let prevPlayerIndex = players.indexOf(prevPlayer)
+  if (prevPlayerIndex !== -1) {
+    hash ^= zobristTable[i][j][prevPlayerIndex]
+  }
+  hash ^= zobristTable[i][j][playerIndex]
 }
 
 function start() {
@@ -106,6 +116,9 @@ function start() {
 }
 
 function coreMove(i, j, playerIndex) {
+  if (hash) {
+    updateBoardHash(i, j, playerIndex)
+  }
   // place disc
   board[i][j] = players[playerIndex]
   counts[playerIndex]++
@@ -170,6 +183,9 @@ function updateReachableSpots(i, j, playerIndex) {
 }
 
 function flipDisc(i, j, playerIndex) {
+  if (hash) {
+    updateBoardHash(i, j, playerIndex)
+  }
   board[i][j] = players[playerIndex]
   counts[playerIndex] += 1
   counts[playerIndex ^ 1] -= 1
@@ -359,7 +375,6 @@ function expand(playerIndex) {
 // https://www.gamedev.net/forums/topic.asp?topic_id=503234
 function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
   // [START check transposition table]
-  const hash = computeBoardHash()
   const store = transpositionTable.get(hash)
   if (store && store.depth >= depth) {
     const {lowerbound, upperbound} = store
@@ -402,6 +417,7 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
   const saveReachableSpots = [...reachableSpots]
   const saveBoard = board.map((e) => e.slice(0)) // clone 2d array with primitive value
   const saveCounts = [...counts]
+  const saveHash = hash
 
   let index = -1
   let bestScore, a, b
@@ -427,6 +443,7 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
       reachableSpots = [...saveReachableSpots]
       board = saveBoard.map((e) => e.slice(0)) // deep restore
       counts = [...saveCounts]
+      hash = saveHash
 
       a = max(a, score)
       // cut-off
@@ -454,6 +471,7 @@ function alphabetaMemo(playerIndex, depth, alpha, beta, isRoot = false) {
       reachableSpots = [...saveReachableSpots]
       board = saveBoard.map((e) => e.slice(0)) // deep restore
       counts = [...saveCounts]
+      hash = saveHash
 
       b = min(b, score)
       // cut-off
@@ -513,6 +531,8 @@ function MTDF(f, depth) {
   let upperBound = Infinity
   let lowerBound = -Infinity
 
+  hash = computeBoardHash()
+
   while (lowerBound < upperBound) {
     beta = max(g, lowerBound + 1)
     ;({bestScore: g, index} = alphabetaMemo(
@@ -529,8 +549,7 @@ function MTDF(f, depth) {
     }
     // console.log(`MTDF: g ${g}, beta ${beta}, (${lowerBound},${upperBound})`) //test
   }
-  console.log(`MTDF: nodeCount ${nodeCount}`)
-  gMTDfCount += nodeCount
+  localMTDfIdCount += nodeCount
   return {g, index}
 }
 
@@ -541,15 +560,16 @@ function MTDF(f, depth) {
  * @param depth max search depth
  */
 function MTDF_ID(depth) {
+  localMTDfIdCount = 0
   let firstGuess = 0
   let index
-  console.log('MTDF_ID: start')
   for (let d = 1; d <= depth; ++d) {
     // console.log(`MTDF_ID: search depth ${d}`) // test
     ;({g: firstGuess, index} = MTDF(firstGuess, d))
     // console.log(`MTDF_ID: firstGuess ${firstGuess}`) //test
   }
-  console.log('MTDF_ID: finished')
+  console.log('MTDF_ID: nodeCount', localMTDfIdCount)
+  globalMTDfIdCount += localMTDfIdCount
   return index
 }
 
@@ -637,7 +657,7 @@ function alphabetaAI(playerIndex, depth, alpha, beta, isRoot = false) {
   }
 
   console.log('alphabetaAI: nodeCount', nodeCount)
-  gAlphabetaCount += nodeCount
+  globalAlphabetaCount += nodeCount
   return {index, bestScore}
 }
 
@@ -718,6 +738,8 @@ function nextTurn(algo = 'random') {
       return
     }
     let index
+
+    const start_check = performance.now()//test
     switch (algo) {
       case 'random':
         index = randomAI()
@@ -745,6 +767,9 @@ function nextTurn(algo = 'random') {
         index = MCS(simulationRound[curPlayerIndex])
         break
     }
+    const end_check = performance.now()//test
+    console.log(`${algo} lapse:`, end_check - start_check)//test
+
     let spot = reachableSpots.splice(index, 1)[0]
     move(spot[0], spot[1])
   } else {
