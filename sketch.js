@@ -561,12 +561,17 @@ function MTDF(f, depth) {
  */
 function MTDF_ID(depth) {
   localMTDfIdCount = 0
-  let firstGuess = 0
+  let evenFirstGuess = 0
+  let oddFirstGuess = 0
   let index
+  let isEvenPly = false
   for (let d = 1; d <= depth; ++d) {
-    // console.log(`MTDF_ID: search depth ${d}`) // test
-    ;({g: firstGuess, index} = MTDF(firstGuess, d))
-    // console.log(`MTDF_ID: firstGuess ${firstGuess}`) //test
+    if (isEvenPly) {
+      ;({g: evenFirstGuess, index} = MTDF(evenFirstGuess, d))
+    } else {
+      ;({g: oddFirstGuess, index} = MTDF(oddFirstGuess, d))
+    }
+    isEvenPly = !isEvenPly
   }
   console.log('MTDF_ID: nodeCount', localMTDfIdCount)
   globalMTDfIdCount += localMTDfIdCount
@@ -899,6 +904,7 @@ let fadeSpeed = 0.45
 function draw() {
   background(244, 248, 252)
 
+  // for coordinate labels
   rectMode(CORNER)
   noStroke()
   fill(0)
@@ -909,6 +915,7 @@ function draw() {
     text(i + 1, squareWidth * i + squareWidth, squareHeight / 4)
   }
 
+  // for game board
   rectMode(CENTER)
   for (let j = 0; j < 8; j++) {
     for (let i = 0; i < 8; i++) {
