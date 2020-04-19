@@ -1,5 +1,7 @@
 'use strict'
 
+const supportNativeBigInt = typeof BigInt === 'function'
+
 let board, reachableSpots, lastPlay, hash
 
 /**
@@ -10,8 +12,8 @@ let curPlayerIndex // current player index: 0 for Black, 1 for White
 const players = ['B', 'W']
 // let human = [true, false]
 const human = [false, false]
-const ai = ['alphabeta', 'mtdf_id'] // 'random', 'alphabeta', 'mtdf', 'mtdf_id', 'mcs', 'mcts'
-const aiDepth = [8, 8] // alphabeta, mtdf, mtdf_id
+const ai = ['alphabeta', supportNativeBigInt ? 'mtdf_id' : 'alphabeta'] // 'random', 'alphabeta', 'mtdf', 'mtdf_id', 'mcs', 'mcts'
+const aiDepth = [6, 6] // alphabeta, mtdf, mtdf_id
 const simulationRound = [500, 500] // mcs, mcts
 
 let interval = 30 // used with setTimeout to resolve rendering blocking
